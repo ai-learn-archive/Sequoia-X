@@ -1,8 +1,13 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "sequoia-x"
 version = "2.0.0"
 requires-python = ">=3.10"
 dependencies = [
+    "akshare>=1.14",
     "baostock>=0.9",
     "pydantic-settings>=2.0",
     "python-dotenv>=1.0",
@@ -25,3 +30,10 @@ select = ["E", "F", "I", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sequoia_x*"]
+
+[tool.setuptools.package-data]
+sequoia_x = ["data/*.md"]

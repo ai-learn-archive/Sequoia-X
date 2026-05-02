@@ -1,5 +1,9 @@
 """配置管理模块：通过 pydantic-settings 从环境变量或 .env 文件加载系统配置。"""
 
+from __future__ import annotations
+
+from typing import Optional
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,6 +12,10 @@ class Settings(BaseSettings):
     start_date: str = "2024-01-01"
     feishu_webhook_url: str  # 必填字段，缺失时抛出 ValidationError
     strategy_webhooks: dict[str, str] = {}
+    # 申万 2021 行业表（默认使用包内 sequoia_x/data/sw2021_industry_doc_table.md）
+    shenwan_industry_table_path: Optional[str] = None
+    # Obsidian 股票库目录（含「股票名称 600000.md」）。不设则自动尝试上一级的 obsidian-shenwan/股票
+    shenwan_stock_vault_path: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

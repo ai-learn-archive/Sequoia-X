@@ -5,6 +5,8 @@ import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+import sequoia_x.notify.feishu as feishu_module
 from hypothesis import given, settings as h_settings
 from hypothesis import strategies as st
 
@@ -18,6 +20,26 @@ def make_settings(webhook_url: str = "https://example.com/default") -> Settings:
         start_date="2024-01-01",
         feishu_webhook_url=webhook_url,
     )
+
+
+@pytest.fixture(autouse=True)
+def _mock_feishu_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
+    """避免测试调用 AkShare / baostock；飞书 HTTP mock 需返回 code=0。"""
+    import sequoia_x.notify.shenwan_industry as sw
+
+    monkeypatch.setattr(sw, "fetch_symbol_to_industry_code", lambda: {})
+    monkeypatch.setattr(
+        feishu_module.FeishuNotifier,
+        "_get_stock_names",
+        staticmethod(lambda symbols: {s: s for s in symbols}),
+    )
+
+
+def _feishu_ok_response() -> MagicMock:
+    m = MagicMock(status_code=200)
+    m.json.return_value = {"code": 0}
+    m.text = "{}"
+    return m
 
 
 # Feature: sequoia-x-v2, Property 10: 飞书通知包含所有选股结果
@@ -34,7 +56,7 @@ def test_notification_contains_all_symbols(symbols: list[str]) -> None:
     notifier = FeishuNotifier(settings)
 
     with patch("requests.post") as mock_post:
-        mock_post.return_value = MagicMock(status_code=200)
+        mock_post.return_value = _feishu_ok_response()
         notifier.send(symbols=symbols, strategy_name="TestStrategy")
 
     call_args = mock_post.call_args
@@ -55,7 +77,7 @@ def test_notification_uses_config_url(webhook_url: str) -> None:
     notifier = FeishuNotifier(settings)
 
     with patch("requests.post") as mock_post:
-        mock_post.return_value = MagicMock(status_code=200)
+        mock_post.return_value = _feishu_ok_response()
         notifier.send(symbols=["000001"], strategy_name="Test", webhook_key="default")
 
     called_url = mock_post.call_args.args[0] if mock_post.call_args.args else mock_post.call_args.kwargs.get("url")
@@ -91,3 +113,42 @@ def test_http_failure_logs_error(status_code: int) -> None:
         feishu_logger.removeHandler(handler)
 
     assert any(r.levelno == _logging.ERROR for r in log_records)
+
+
+def test_parse_sw_frontmatter_from_obsidian_style_file(tmp_path) -> None:
+    """与 obsidian-shenwan 股票笔记 frontmatter 一致时可解析申万三级。"""
+    from sequoia_x.notify.shenwan_industry import parse_sw_frontmatter
+
+    md = tmp_path / "ST长投 600119.md"
+    md.write_text(
+        '---\n'
+        '申万一级行业: "交通运输"\n'
+        '申万二级行业: "物流"\n'
+        '申万三级行业: "跨境物流"\n'
+        "---\n# x\n",
+        encoding="utf-8",
+    )
+    assert parse_sw_frontmatter(md) == ("交通运输", "物流", "跨境物流")
+
+
+def test_nested_pick_list_groups_by_sw_industry() -> None:
+    """选股列表按申万层级嵌套；行业代码未命中时归入未分类。"""
+    from sequoia_x.notify.shenwan_industry import build_nested_pick_markdown
+
+    l3 = {"110101": ("农林牧渔", "种植业", "种子")}
+    l2: dict[str, tuple[str, str]] = {}
+    text = build_nested_pick_markdown(
+        ["000001", "000002"],
+        {
+            "000001": "[A](https://xueqiu.com/S/SZ000001)",
+            "000002": "[B](https://xueqiu.com/S/SZ000002)",
+        },
+        l3,
+        l2,
+        {"000001": "110101"},
+    )
+    assert "- 农林牧渔" in text
+    assert "  - 种植业" in text
+    assert "    - 种子" in text
+    assert "[A]" in text
+    assert "- 未分类" in text and "[B]" in text

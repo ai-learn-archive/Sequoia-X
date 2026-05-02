@@ -1,19 +1,26 @@
 """飞书通知模块：将选股结果通过 Webhook 推送至飞书群。"""
 
+from __future__ import annotations
+
 import json
 from datetime import date
+from pathlib import Path
 
 import requests
 
 from sequoia_x.core.config import Settings
 from sequoia_x.core.logger import get_logger
+from sequoia_x.notify.shenwan_industry import (
+    build_pick_list_content,
+    default_stock_vault_path,
+)
 
 logger = get_logger(__name__)
 
 # 飞书卡片标题与「策略」字段展示名（与 BaseStrategy.webhook_key 对应）
 STRATEGY_DISPLAY_NAME_ZH: dict[str, str] = {
     "ma_volume": "均线+放量突破",
-    "turtle": "海龟交易",
+    "turtle": "海龟交易。20日新高突破 + 成交额过亿 + 动量阳线过滤",
     "flag": "高窄旗形",
     "shakeout": "涨停洗盘",
     "limit_down": "上升趋势跌停反包",
@@ -67,13 +74,34 @@ class FeishuNotifier:
         display_name = STRATEGY_DISPLAY_NAME_ZH.get(webhook_key.lower(), strategy_name)
         names = self._get_stock_names(symbols)
 
-        links: list[str] = []
+        code_to_link_line: dict[str, str] = {}
         for code in symbols:
             xq_code = self._to_xueqiu_code(code)
             name = names.get(code, xq_code)
-            links.append(f"[{name}](https://xueqiu.com/S/{xq_code})")
+            code_to_link_line[code] = f"[{name}](https://xueqiu.com/S/{xq_code})"
 
-        symbol_text = " ".join(links) if links else "（无选股结果）"
+        table_path: Path | None = None
+        if self.settings.shenwan_industry_table_path:
+            table_path = Path(self.settings.shenwan_industry_table_path).expanduser()
+
+        vault_path: Path | None = None
+        if self.settings.shenwan_stock_vault_path:
+            vp = Path(self.settings.shenwan_stock_vault_path).expanduser()
+            if vp.is_dir():
+                vault_path = vp
+            else:
+                logger.warning(f"shenwan_stock_vault_path 不是有效目录，已忽略：{vp}")
+        else:
+            dv = default_stock_vault_path()
+            if dv.is_dir():
+                vault_path = dv
+
+        if symbols:
+            symbol_text = build_pick_list_content(
+                symbols, code_to_link_line, table_path, vault_path
+            )
+        else:
+            symbol_text = "（无选股结果）"
 
         return {
             "msg_type": "interactive",

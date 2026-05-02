@@ -10,6 +10,16 @@ from sequoia_x.core.logger import get_logger
 
 logger = get_logger(__name__)
 
+# 飞书卡片标题与「策略」字段展示名（与 BaseStrategy.webhook_key 对应）
+STRATEGY_DISPLAY_NAME_ZH: dict[str, str] = {
+    "ma_volume": "均线+放量突破",
+    "turtle": "海龟交易",
+    "flag": "高窄旗形",
+    "shakeout": "涨停洗盘",
+    "limit_down": "上升趋势跌停反包",
+    "rps": "RPS 相对强度突破",
+}
+
 
 class FeishuNotifier:
     """飞书 Webhook 推送器。
@@ -52,8 +62,9 @@ class FeishuNotifier:
         bs.logout()
         return mapping
 
-    def _build_card(self, symbols: list[str], strategy_name: str) -> dict:
+    def _build_card(self, symbols: list[str], strategy_name: str, webhook_key: str) -> dict:
         today = date.today().strftime("%Y-%m-%d")
+        display_name = STRATEGY_DISPLAY_NAME_ZH.get(webhook_key.lower(), strategy_name)
         names = self._get_stock_names(symbols)
 
         links: list[str] = []
@@ -70,7 +81,7 @@ class FeishuNotifier:
                 "header": {
                     "title": {
                         "tag": "plain_text",
-                        "content": f"📈 Sequoia-X 选股播报 | {strategy_name}",
+                        "content": f"📈 Sequoia-X 选股播报 | {display_name}",
                     },
                     "template": "blue",
                 },
@@ -79,7 +90,11 @@ class FeishuNotifier:
                         "tag": "div",
                         "text": {
                             "tag": "lark_md",
-                            "content": f"**日期：** {today}\n**策略：** {strategy_name}\n**选股数量：** {len(symbols)}",
+                            "content": (
+                                f"**日期：** {today}\n"
+                                f"**策略：** {display_name}\n"
+                                f"**选股数量：** {len(symbols)}"
+                            ),
                         },
                     },
                     {"tag": "hr"},
@@ -108,14 +123,14 @@ class FeishuNotifier:
 
         Args:
             symbols: 选股结果代码列表。
-            strategy_name: 策略名称，用于卡片标题。
-            webhook_key: 策略标识，用于路由到对应飞书机器人。
+            strategy_name: 策略类名；未在 STRATEGY_DISPLAY_NAME_ZH 中配置 webhook_key 时用于展示兜底。
+            webhook_key: 策略标识，用于路由 Webhook 并解析中文展示名。
 
         Raises:
             不抛出异常，HTTP 失败时记录 ERROR 日志。
         """
         url = self.settings.get_webhook_url(webhook_key)
-        payload = self._build_card(symbols, strategy_name)
+        payload = self._build_card(symbols, strategy_name, webhook_key)
 
         try:
             resp = requests.post(
